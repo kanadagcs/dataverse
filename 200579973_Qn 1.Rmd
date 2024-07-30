@@ -1,0 +1,329 @@
+#Q1) When is the best time of day, day of the week, and time of year to fly to minimise delays?
+
+
+```{r}
+#set working directory that contains the files
+setwd("/Users/sugianto/Desktop/dataverse_files")
+getwd()
+
+# Load the necessary libraries
+library(tidyr) # using "tidyr" package to clean up data 
+library(dplyr) # using "dplyr" package to manipulate the data frames
+library(ggplot2) # to plot a bar graph 
+library(lubridate)
+library(data.table)
+library(RColorBrewer)
+library(randomForest)
+library(ggplot2)
+
+#Read variables
+airports <- read.csv("airports.csv")
+carriers <- read.csv("carriers.csv")
+airplanes <- read.csv("plane-data.csv")
+
+# Load the flight data
+data1 <- read.csv("2004.csv")
+data2 <- read.csv("2005.csv")
+```
+
+
+```{r}
+#Datas without cancelled and diverted flights.
+data1 <- data1 %>% filter(Cancelled == 0 & Diverted == 0)
+data2 <- data2 %>% filter(Cancelled == 0 & Diverted == 0)
+
+#Look for Dataset sizes 
+nrow(data1)
+nrow(data2)
+
+#Full join data frames
+data <- data1 %>% full_join(data2)
+
+#Create delay column
+data$delay <- (data$ArrDelay+data$DepDelay)
+
+#Look for missing values (DepDelay and ArrDelay should be removed due to cancelled&diverted = 0)
+colSums(is.na(data))
+summary(data)
+```
+
+#Qn 1a. When is the best day of the week to fly to minimise delays?
+```{r}
+#Convert months and DayofWeek to corresponding names.
+data$Month_name <- month.abb[data$Month] #month names
+data$DayOfWeek <- recode(data$DayOfWeek, 
+                       "1"="Monday",
+                       "2"="Tuesday",
+                       "3"="Wednesday",
+                       "4"="Thursday",
+                       "5"="Friday",
+                       "6"="Saturday",
+                       "7"="Sunday") #weekday names
+
+#Create table in data
+mean_day <- data[c('DayOfWeek','DepDelay','ArrDelay')] #select columns
+mean_day <- mean_day %>%
+  group_by(DayOfWeek) %>%
+  summarize(Dep_del = mean(DepDelay), Arr_del = mean(ArrDelay)) #group and average
+
+#Create columns in new data
+mean_day$avg_delay_day <- ((mean_day$Dep_del+mean_day$Arr_del)/2)
+mean_day$total_avg_delay_day <- ((mean_day$Dep_del+mean_day$Arr_del))
+mean_day %>% 
+  group_by(total_avg_delay_day) %>% 
+  arrange((total_avg_delay_day)) #group and arrange
+
+```
+
+```{r}
+# Plot the graph
+plot_mean_day <- mean_day %>%
+  select(DayOfWeek, avg_delay_day)%>%
+  group_by(DayOfWeek) %>% 
+  arrange((avg_delay_day)) #group and arrange
+
+ggplot(plot_mean_day, aes(x=DayOfWeek, y=avg_delay_day, fill=DayOfWeek, color=DayOfWeek)) +
+  geom_bar(stat='identity') +
+  ylab("Avg Delay (min)") + xlab("Day of Week") +   
+  labs(title = "Average Delay of Weekdays") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+```
+
+```{r}
+#Create table data for flights
+total_day <- data[c('DayOfWeek','delay')] #select columns
+total_day <- total_day  %>%
+  group_by(DayOfWeek) %>%
+  tally %>% arrange(desc(n)) #total arrival delays
+names(total_day)[names(total_day) == 'n'] <- 'Flights'
+
+#Create columns in total_day data in Percentage
+total_day$Flights_perc <- ((total_day$Flights/13980567)*100)
+
+#Create table data for delays
+total_day2 <- data[c('DayOfWeek','DepDelay','ArrDelay')] #select columns
+total_day2 <- subset(total_day2, DepDelay > 0 | ArrDelay > 0)
+names(total_day2)[names(total_day2) == 'DepDelay'] <- 'Delay_perc'
+total_day2 <- total_day2 %>%
+  group_by(DayOfWeek) %>%
+  tally %>% arrange(desc(n)) #total arrival delays
+names(total_day2)[names(total_day2) == 'n'] <- 'Delays'
+
+#Join the data
+day_data = left_join(total_day, total_day2, by = c("DayOfWeek" = "DayOfWeek"))
+day_data$Delays_perc= (day_data$Delays/day_data$Flights) #create delay in percentage column
+day_data
+```
+
+```{r}
+#Plot the graph
+day_data_plot <- day_data %>%
+  select(DayOfWeek, Delays_perc)%>%
+  group_by(DayOfWeek) %>% 
+  arrange((Delays_perc)) #group and arrange
+
+ggplot(day_data_plot, aes(x=DayOfWeek, y=Delays_perc, fill=DayOfWeek, color=DayOfWeek)) +
+  geom_bar(stat='identity') +
+  ylab("Percentage") + xlab("Day of Week") +     
+  labs(title = "Avg Delay of Weekdays (%)") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+```
+
+#Qn 1b. When is the best time of day to fly to minimize delays?
+```{r}
+#Create time of day bin categories
+categories<-c('night','before noon','afternoon','evening')
+data$arr_time_bin<-cut(data$ArrTime, seq(0,2400,600),labels=categories)
+data$dep_time_bin<-cut(data$DepTime, seq(0,2400,600),labels=categories)
+
+#Create time of Day data
+day_time = data[c('DepDelay','dep_time_bin','ArrDelay','arr_time_bin')]
+day_time
+
+#Drop the missing values we found above.
+day_time <- na.omit(day_time)
+
+#Create total data's
+total_arr = day_time  %>% group_by(arr_time_bin) %>% 
+  tally %>% arrange(desc(n)) #total arrival delays
+total_arr 
+
+total_dep = day_time  %>% group_by(dep_time_bin) %>% 
+  tally %>% arrange(desc(n)) #total departure delays
+total_dep #show
+
+#The lowest delay in a day is at night of approximate 310000 delays 
+```
+
+```{r}
+#Create Data's for mean
+mean_time_arr <- day_time %>%
+  group_by(arr_time_bin) %>%
+  summarize(arr_mean = mean(ArrDelay))
+mean_time_arr #show table
+
+mean_time_dep <- day_time %>%
+  group_by(dep_time_bin) %>%
+  summarize(dep_mean = mean(DepDelay))
+mean_time_dep #show table
+
+#Time of day column with arr_time_bin & dep_time_bin as variables
+names(mean_time_arr)[names(mean_time_arr) == 'arr_time_bin'] <- 'time_of_day'
+names(mean_time_dep)[names(mean_time_dep) == 'dep_time_bin'] <- 'time_of_day'
+data_arr <- data.table(mean_time_arr, key = "time_of_day") 
+data_dep <- data.table(mean_time_dep, key = "time_of_day")
+
+#Mean
+mean_time_dep <- data_arr[data_dep]
+mean_time_dep$avg_delay_day <- ((mean_time_dep$dep_mean+mean_time_dep$arr_mean)) #avg delay column
+mean_time_dep$total_delay_day <- ((mean_time_dep$dep_mean+mean_time_dep$arr_mean)) #total avg delay column
+
+#Group arrange
+mean_time_day <- mean_time_dep %>% 
+  group_by(avg_delay_day) %>% 
+  arrange((avg_delay_day)) 
+mean_time_day
+```
+
+```{r}
+#Create total Dep columns
+dep_time_day <- day_time %>% group_by(dep_time_bin) %>% 
+  tally %>% arrange(desc(n))
+names(dep_time_day)[names(dep_time_day) == 'n'] <- 'Flights'
+
+#Create total Arr columns
+arr_time_day <- day_time%>% group_by(arr_time_bin) %>% 
+  tally %>% arrange(desc(n))
+names(arr_time_day)[names(arr_time_day) == 'n'] <- 'Flights'
+
+#Join
+tot_time_day = left_join(dep_time_day, arr_time_day, by = c("dep_time_bin" = "arr_time_bin"))
+names(tot_time_day)[names(tot_time_day) == 'dep_time_bin'] <- 'TimeofDay'
+tot_time_day$Flights <- tot_time_day$Flights.x+tot_time_day$Flights.y
+tot_time_day<- tot_time_day %>% select('TimeofDay', 'Flights')
+
+#Data Dep Delays columns
+dep2_time_day <- subset(day_time, DepDelay > 0)
+dep2_time_day <- dep2_time_day %>%
+  group_by(dep_time_bin) %>%
+  tally %>% arrange(desc(n)) #total arrival delays
+names(dep2_time_day)[names(dep2_time_day) == 'n'] <- 'Delays'
+
+#Data Arr delays columns
+arr2_time_day <- subset(day_time, ArrDelay > 0)
+arr2_time_day <- arr2_time_day %>%
+  group_by(arr_time_bin) %>%
+  tally %>% arrange(desc(n)) #total arrival delays
+names(arr2_time_day)[names(arr2_time_day) == 'n'] <- 'Delays'
+
+#Join
+tot2_time_day = left_join(dep2_time_day, arr2_time_day, by = c("dep_time_bin" = "arr_time_bin"))
+names(tot2_time_day)[names(tot2_time_day) == 'dep_time_bin'] <- 'TimeofDay'
+tot2_time_day$Delays <- tot2_time_day$Delays.x+tot2_time_day$Delays.y
+tot2_time_day<- tot2_time_day %>% select('TimeofDay', 'Delays')
+
+#Final join and show table
+tot3_time_day = left_join(tot_time_day, tot2_time_day, by = c("TimeofDay" = "TimeofDay"))
+tot3_time_day$Delays_perc= (tot3_time_day$Delays/tot3_time_day$Flights) #create delay in percentage column
+tot3_time_day
+```
+
+```{r}
+#Plot the graph
+plot_tot3_time_day <- tot3_time_day %>%
+  select(TimeofDay, Delays_perc)%>%
+  arrange((Delays_perc)) #group and arrange
+
+ggplot(plot_tot3_time_day, aes(x=TimeofDay, y=Delays_perc, fill=TimeofDay)) +
+  geom_bar(stat='identity') +
+  ylab("Percentage") + xlab("Time of Day") +     
+  labs(title = "Delays Percentage by Time of Day") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+```
+
+#Qn 1c. When is the best time of year to fly to minimise delays?
+
+```{r}
+#Mean
+#Create Data with columns of interest
+mean_month <- data[c('Month','DepDelay','ArrDelay')]
+mean_month <- mean_month %>%
+  group_by(Month) %>%
+  summarize(Dep_del = mean(DepDelay), Arr_del = mean(ArrDelay)) 
+
+#Average columns
+mean_month$avg_delay_day <- ((mean_month$Dep_del+mean_month$Arr_del)/2) #avg. column
+mean_month$tot_avg_delay_day <- (mean_month$Dep_del+mean_month$Arr_del) #tot column
+
+#Group and Arrange
+mean_month %>% 
+  group_by(avg_delay_day) %>% 
+  arrange((avg_delay_day)) 
+
+#Create Data for flight total
+tot_month <- data[c('Month_name','delay')]
+tot_month <- tot_month %>%
+  group_by(Month_name) %>%
+  tally %>% arrange(desc(n)) 
+
+names(tot_month)[names(tot_month) == 'n'] <- 'Flights'
+tot_month$Flights_perc <-  ((tot_month$Flights/13980567)*100)
+tot_month
+
+#Create data for delays
+tot2_month <- data[c('Month_name','DepDelay','ArrDelay')]
+tot2_month <- subset(tot2_month, DepDelay > 0 | ArrDelay > 0)
+tot2_month <- tot2_month %>%
+  group_by(Month_name) %>%
+  tally %>% arrange(desc(n)) 
+names(tot2_month)[names(tot2_month) == 'n'] <- 'Delays'
+tot2_month
+
+#Join
+tot3_month = left_join(tot_month, tot2_month, by = c("Month_name" = "Month_name"))
+tot3_month$Delays_perc = (tot3_month$Delays/tot3_month$Flights) #create delay in percentage column
+tot3_month <- arrange(tot3_month,Delays_perc) #arrange
+tot3_month
+```
+
+```{r}
+#Plot the graph
+plot_tot3_time_month <- tot3_month %>%
+  select(Month_name, Delays_perc)%>%
+  arrange((Delays_perc)) #group and arrange
+
+ggplot(plot_tot3_time_month, aes(x=Month_name, y=Delays_perc, fill=Month_name)) +
+  geom_bar(stat='identity') +
+  ylab("Percentage") + xlab("Month name") +     
+  labs(title = "Delays Percentage by Month of Year") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+```
+
+```{r}
+# To see the delay in seasons
+winter <- mean_month[12, ] + mean_month[1, ]+ mean_month[2, ]
+spring <- mean_month[3, ] + mean_month[4, ]+ mean_month[5, ]
+summer <- mean_month[6, ] + mean_month[7, ]+ mean_month[8, ]
+autumn <- mean_month[9, ] + mean_month[10, ]+ mean_month[11, ]
+
+#print results
+print(paste("Total average delay during the spring: ", spring$tot_avg_delay_day))
+print(paste("Total average delay during the summer: ", summer$tot_avg_delay_day))
+print(paste("Total average delay during the autumn: ", autumn$tot_avg_delay_day))
+print(paste("Total average delay during the winter: ", winter$tot_avg_delay_day))
+
+#Autumn is the best season to go for holiday as the delay is the lowest
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,112 @@
+#Qn 5.Use the available variables to construct a model that predicts delays.
+
+```{r}
+#set working directory that contains the files
+setwd("/Users/sugianto/Desktop/dataverse_files")
+getwd()
+
+# Load the necessary libraries
+library(tidyr) # using "tidyr" package to clean up data 
+library(dplyr) # using "dplyr" package to manipulate the data frames
+library(ggplot2) # to plot a bar graph 
+library(lubridate)
+library(RColorBrewer)
+library(randomForest)
+library(ROCR) #load roc curve library for prediction and plotting
+
+# Load the flight data
+data1 <- read.csv("2004.csv")
+data2 <- read.csv("2005.csv")
+
+#Dtas without cancelled and diverted flights.
+data1 <- data1 %>% filter(Cancelled == 0 & Diverted == 0)
+data2 <- data2 %>% filter(Cancelled == 0 & Diverted == 0)
+
+#Full join data frames
+data <- data1 %>% full_join(data2)
+
+#Create delay column
+data$delay <- (data$ArrDelay+data$DepDelay)
+```
+
+```{r}
+# 1st model use Linear Regression
+# Subset the data for the variables you want to use
+data_subset <- data %>% select(delay, Distance)
+
+# Use the available variables to construct a model that predicts delays.
+model <- lm(delay ~ Distance, data = data_subset)
+```
+
+```{r}
+# Subset data for test set
+set.seed(123)
+test_indices <- sample(nrow(data_subset), 50000)
+test_data <- data_subset[test_indices, ]
+
+# Predictions on test set
+predictions <- predict(model, test_data)
+```
+
+```{r}
+# Calculate RMSE
+rmse <- sqrt(mean((test_data$delay - predictions)^2))
+cat("RMSE:", rmse, "\n")
+```
+
+```{r}
+# Calculate accuracy within certain threshold (e.g., 10 minutes)
+threshold <- 10
+accuracy <- mean(abs(test_data$delay - predictions) <= threshold)
+cat("Accuracy within", threshold, "minutes:", accuracy, "\n")
+```
+
+```{r}
+#2nd Model is Random Forest
+#Create data for ml (we use data1 and data2 where cancelled and diverted are excluded)
+data_ml <- data1 %>% full_join(data2) #join data's for ml
+
+#Prepare for model
+data_ml$delay <- (data_ml$ArrDelay+data_ml$DepDelay) #create delay column
+data_ml$delay_binary <- ifelse(data_ml$delay>0, 1, 0) #create target column in binary. 0 = on time, 1 = delay.
+data_ml <- data_ml[, which(names(data_ml) != "delay")] #drop delay column
+data_ml <- sample_n(data_ml, 250000) #sample due to computational limitations
+data_ml$delay_binary <- as.factor(data_ml$delay_binary) # convert target column to factor
+```
+
+```{r}
+#Splitting into training and test set (80/20)
+set.seed(100)
+ml_training_set <- sample(nrow(data_ml), 0.8*nrow(data_ml), replace = FALSE)
+X_train <- data_ml[ml_training_set,]
+X_test <- data_ml[-ml_training_set,]
+
+#Create model using random forest
+rf_model <- randomForest(delay_binary ~ ., data = X_train, importance = TRUE)
+rf_model
+```
+
+```{r}
+#predictions
+predictions <- predict(rf_model, X_test, type = "class") #classification predictions
+predictions <- mean(predictions == X_test$delay_binary) #target mean
+print(paste("Random Forrest model prediction : ",predictions))
+```
+
+```{r}
+#plots
+#class error over amount of trees
+plot(rf_model,lwd=1, main="Class error over no. of trees")
+```
+
+```{r}
+#roc curve
+pred2 = predict(rf_model,type = "prob") #predict with probability
+pred2 = prediction(pred2[,2], X_train$delay_bin)
+pred2 = performance(pred2, 'tpr','fpr') #use performance function from ROCR library
+
+plot(pred2,lwd=2,col=4,main="Binary Random Forest model in R") #set linewidth, color, title and  plot.
+```
+
+
+

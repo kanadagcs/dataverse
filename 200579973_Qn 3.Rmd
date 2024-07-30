@@ -1,0 +1,227 @@
+#Qn 3. How does the number of people flying between different locations change over time?
+
+```{r}
+#set working directory that contains the files
+setwd("/Users/sugianto/Desktop/dataverse_files")
+getwd()
+
+install.packages("ggrepel")
+install.packages("mapproj")
+
+# Load the necessary libraries
+library(tidyr) # using "tidyr" package to clean up data 
+library(dplyr) # using "dplyr" package to manipulate the data frames
+library(ggplot2) # to plot a bar graph 
+library(lubridate)
+library(data.table)
+library(RColorBrewer)
+library(mapproj)
+library(ggrepel)
+```
+
+```{r}
+#Read Data
+airports <- read.csv("airports.csv")
+
+data1 = read.csv("2000.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2000 = n()) %>%
+  arrange(desc(y2000)) %>%
+  collect()
+
+data2 = read.csv("2001.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2001 = n()) %>%
+  arrange(desc(y2001)) %>%
+  collect()
+
+data3 = read.csv("2002.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2002 = n()) %>%
+  arrange(desc(y2002)) %>%
+  collect()
+
+data4 = read.csv("2003.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2003 = n()) %>%
+  arrange(desc(y2003)) %>%
+  collect()
+
+data5 = read.csv("2004.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2004 = n()) %>%
+  arrange(desc(y2004)) %>%
+  collect()
+
+data6 = read.csv("2005.csv")[ ,c("Origin", "Dest", "Year")] %>%
+  group_by(Origin, Dest) %>%
+  summarise(y2005 = n()) %>%
+  arrange(desc(y2005)) %>%
+  collect()
+
+
+#Merge all
+datamerged <- list(data1, data2, data3, data4, data5, data6)
+data_locations <- purrr::reduce(.x = datamerged, merge, by = c("Origin", "Dest"), all = T)
+head(data_locations, 5)
+```
+
+```{r}
+#Clean the new Data and replace nan with 0 or no flights
+data_locations <- data_locations %>%
+  mutate_all(funs(ifelse(is.na(.), 0, .))) 
+
+data_locations$Total <- rowSums(data_locations[,3:8] ) #create new total col
+data_locations <- data_locations %>% arrange(desc(Total)) #arrange
+data_locations <- head(data_locations,20) #select only top 20 
+data_locations
+```
+
+```{r}
+#add locations together:
+con1 <- data_locations[1,3:8] + data_locations[2,3:8]
+con1$connection = c("LAX&LAS")
+con1 <- con1 %>%
+  select(connection, everything())
+
+con2 <- data_locations[3,3:8] + data_locations[4,3:8]
+con2$connection = c("PHX&LAX")
+con2 <- con2 %>%
+  select(connection, everything())
+
+con3 <- data_locations[5,3:8] + data_locations[6,3:8]
+con3$connection = c("MSP&ORD")
+con3 <- con3 %>%
+  select(connection, everything())
+
+con4  <- data_locations[7,3:8] + data_locations[8,3:8]
+con4$connection = c("BOS&LGA")
+con4 <- con4 %>%
+  select(connection, everything())
+
+con5  <- data_locations[9,3:8] + data_locations[10,3:8]
+con5$connection = c("SAN&LAX")
+con5 <- con5 %>%
+  select(connection, everything())
+
+con6  <- data_locations[11,3:8] + data_locations[12,3:8]
+con6$connection = c("LAS&PHX")
+con6 <- con6 %>%
+  select(connection, everything())
+
+con7  <- data_locations[13,3:8] + data_locations[14,3:8]
+con7$connection = c("DCA&LGA")
+co7 <- con7 %>%
+  select(connection, everything())
+
+con8  <- data_locations[15,3:8] + data_locations[16,3:8]
+con8$connection = c("LGA&ORD")
+con8 <- con8 %>%
+  select(connection, everything())
+
+con9  <- data_locations[17,3:8] + data_locations[18,3:8]
+con9$connection = c("SFO&LAX")
+con9 <- con9 %>%
+  select(connection, everything())
+
+con10  <- data_locations[19,3:8] + data_locations[20,3:8]
+con10$connection = c("HOU&DAL")
+con10 <- con10 %>%
+  select(connection, everything())
+
+data2 <- list(con1,con2,con3,con4,con5,con6,con7,con8,con9,con10) #select frames
+data_locations2 <- purrr::reduce(.x = data2, merge, all = T) #merge 
+
+data_locations2 <- data_locations2 %>% arrange(desc(Total)) #arrange
+data_locations2 #explore
+```
+
+```{r}
+# add total by year row
+library(janitor)
+data_locations3 <- data_locations2 %>%
+  adorn_totals("row")
+data_locations3
+```
+
+```{r}
+#Count connections
+connections <- data_locations %>%
+  group_by(Origin, Dest,Total) %>%
+  summarise(n = sum(Total)) %>%
+  arrange(desc(Total)) %>%
+  collect()
+
+#manuel rank
+list_rank= c(1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10)
+connections$rank <-list_rank
+connections
+```
+
+```{r}
+#2nd df with lat and long data from airports ds for line between airports
+connections2 = left_join(connections, airports, by = c("Origin" = "iata")) %>%
+  select(Origin, Dest, n, Origin_Lat = lat, Origin_Long = long) %>%
+  left_join(airports, by = c("Dest" = "iata")) %>%
+  select(Origin, Dest, n, Origin_Lat, Origin_Long, Dest_Lat = lat, Dest_Long = long)
+
+#3nd df for the labels of airports
+connections3_1 = connections %>%
+  group_by(Origin) %>%
+  summarise(n = sum(n)) %>%
+  arrange(desc(n))
+
+#Join
+connections3 = left_join(connections3_1, airports, by = c("Origin" = "iata")) %>%
+  select(Origin, n, Origin_Lat = lat, Origin_Long = long)
+conections3 <- within(connections3, rm(n)) #remove n column
+
+
+connections %>%
+  filter() %>%
+  group_by(Origin, Dest) %>%
+  #summarise(n = sum(n, na.rm = TRUE)) %>%
+  inner_join(airports, by = c("Dest" = "iata")) %>%
+  ggplot(aes(y = lat, x = long)) +
+  borders("state", fill = "lightgrey") +
+  geom_point(aes(colour = rank), alpha = 0.4, size = 7) + 
+  ggtitle("Map of US flights between locations (2000-2005)") +theme(plot.title = element_text(hjust = 0.5)) +
+  geom_segment(data = connections2,
+               mapping = aes(x = Origin_Long, y = Origin_Lat, xend = Dest_Long, yend = Dest_Lat),
+               alpha = 1, colour = "purple", size = 0.8) +
+  geom_label_repel(aes(x = Origin_Long, y = Origin_Lat, label = Origin), data = connections3) +
+  coord_map(xlim = c(-125, -65), ylim = c(25, 50))+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.position="none")
+```
+
+```{r}
+#data prep
+plot_data_locations2 <- data_locations2[,1:7] #plot 1 data
+plot_data_locations2 <- data_locations2 %>%
+  select(connection,y2000, y2001, y2002, y2005) #plot 2 data
+plot3_data_locations2 <- data_locations3[,1:7] #plot 3 data
+
+#Plot exploration in year 2000
+data1_2 = read.csv("2000.csv")[ ,c("Origin", "Dest", "Month")] %>%
+  group_by(Month) %>%
+  summarise(y2000 = n()) %>%
+  arrange(Month) %>%
+  collect()
+data1_2$Month_name <- month.abb[data1_2$Month]
+
+
+ggplot(data1_2, aes(x=Month_name, y=y2000, group= 1)) + 
+  geom_line(color = 4, size = 1.3) + scale_x_discrete(limits = month.abb)+
+  ggtitle("Exploration of drop in 2000") +
+  xlab("Month") +
+  ylab("Total no. of flights") +
+  theme_minimal()+ 
+  theme(
+    plot.title=element_text( hjust=0.5, vjust=0.5)) 
+```

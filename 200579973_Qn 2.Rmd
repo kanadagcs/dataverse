@@ -1,0 +1,124 @@
+# Q2. Do older planes suffer more delay?
+
+```{r}
+#set working directory that contains the files
+setwd("/Users/sugianto/Desktop/dataverse_files")
+getwd()
+
+# Load the necessary libraries
+library(tidyr) # using "tidyr" package to clean up data 
+library(dplyr) # using "dplyr" package to manipulate the data frames
+library(ggplot2) # to plot a bar graph 
+library(lubridate)
+library(data.table)
+library(RColorBrewer)
+library(randomForest)
+library(ggplot2)
+
+#Read variables
+airports <- read.csv("airports.csv")
+carriers <- read.csv("carriers.csv")
+airplanes <- read.csv("plane-data.csv")
+
+# Load the flight data
+data1 <- read.csv("2004.csv")
+data2 <- read.csv("2005.csv")
+
+#Datas without cancelled and diverted flights.
+data1 <- data1 %>% filter(Cancelled == 0 & Diverted == 0)
+data2 <- data2 %>% filter(Cancelled == 0 & Diverted == 0)
+
+#Look for Dataset sizes 
+nrow(data1)
+nrow(data2)
+
+#Full join data frames
+data <- data1 %>% full_join(data2)
+
+#Create delay column
+data$delay <- (data$ArrDelay+data$DepDelay)
+
+#Look for missing values (DepDelay and ArrDelay should be removed due to cancelled&diverted = 0)
+colSums(is.na(data))
+summary(data)
+```
+
+```{r}
+#join data and airplane data
+names(data)[names(data) == 'TailNum'] <- 'tailnum' #match name of variable data airplane
+#join
+data_airplanes <- inner_join(data,
+                             select(airplanes, tailnum, year),
+                             by = "tailnum"
+)
+
+#edit the joined df
+names(data_airplanes)[names(data_airplanes) == 'year'] <- 'plane_year' #change col name
+data_airplanes$plane_year <- as.numeric(data_airplanes$plane_year) #change plane_year column to numeric
+data_airplanes <- data_airplanes[!is.na(data_airplanes$plane_year),] #Drop NA's
+
+data_airplanes #explore 
+```
+
+```{r}
+#A plane old is +20 years (1987) (ref :https://www.paramountbusinessjets.com/faq/age-of-aircraft-safety-factor)
+#add plane_condition column and define category
+data_airplanes <- data_airplanes %>% 
+  mutate(plane_condition = if_else(plane_year <= 1987, "old", "new"))
+
+#Total no. of old and new planes
+data_airplanes %>% group_by(plane_condition) %>% 
+  tally %>% arrange(desc(n)) #explore with conditions
+
+#There is significant more new planes, so lets look at the mean.  
+```
+
+```{r}
+#Mean delay for old vs. new planes
+mean_plane <- data_airplanes %>%
+  group_by(plane_condition) %>%
+  summarize(delay = mean(delay))
+names(mean_plane)[names(mean_plane) == 'delay'] <- 'Total_avg_delay'
+
+#Create data for flight total
+tot_plane <- data_airplanes[c('plane_condition','delay')]
+tot_plane <- tot_plane %>%
+  group_by(plane_condition) %>%
+  tally %>% arrange(desc(n)) 
+names(tot_plane)[names(tot_plane) == 'n'] <- 'Flights'
+tot_plane$Flights_perc <- (tot_plane$Flights/(8146989+1165290)*100)
+tot_plane
+
+#Create data for delays
+tot2_plane <- data_airplanes[c('plane_condition','DepDelay','ArrDelay')]
+tot2_plane <- subset(tot2_plane, DepDelay > 0 | ArrDelay >0)
+tot2_plane <- tot2_plane %>%
+  group_by(plane_condition) %>%
+  tally %>% arrange(desc(n)) 
+names(tot2_plane)[names(tot2_plane) == 'n'] <- 'Delays'
+tot2_plane
+
+#Join
+tot3_plane = left_join(tot_plane, tot2_plane, by = c("plane_condition" = "plane_condition"))
+tot3_plane$Delays_perc = (tot3_plane$Delays/tot3_plane$Flights) #create delay in percentage column
+tot3_plane <- arrange(tot3_plane,Delays_perc) #arrange
+
+#Join with mean
+all_plane = left_join(tot3_plane, mean_plane, by = c("plane_condition" = "plane_condition"))
+all_plane #explore
+```
+
+```{r}
+#Plot 
+ggplot(mean_plane, aes(x=plane_condition, y=Total_avg_delay, fill=plane_condition, color=plane_condition)) +
+  geom_bar(stat='identity') +
+  ylab("Minutes") + xlab("Plane condition") +     
+  labs(title = "Mean time of Delays for planes") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+#Plot2
+ggplot(all_plane, aes(x=plane_condition, y=Delays_perc, fill=plane_condition, color=plane_condition)) +
+  geom_bar(stat='identity') +
+  ylab("Percentage") + xlab("Plane condition") +     
+  labs(title = "Percentage of delayed flights") +
+  theme(axis.text.x=element_text(angle=35,hjust=1))
+```

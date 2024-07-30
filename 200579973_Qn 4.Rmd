@@ -1,0 +1,97 @@
+#Qn 4. Can you detect cascading failures as delays in one airport create delays in others?
+
+```{r}
+#set working directory that contains the files
+setwd("/Users/sugianto/Desktop/dataverse_files")
+getwd()
+
+# Load the necessary libraries
+library(tidyr) # using "tidyr" package to clean up data 
+library(dplyr) # using "dplyr" package to manipulate the data frames
+library(ggplot2) # to plot a bar graph 
+library(lubridate)
+library(data.table)
+library(RColorBrewer)
+library(hms)
+library(caret)
+
+#Read variables
+airports <- read.csv("airports.csv")
+carriers <- read.csv("carriers.csv")
+airplanes <- read.csv("plane-data.csv")
+
+# Load the flight data
+data1 <- read.csv("2004.csv")
+data2 <- read.csv("2005.csv")
+
+#Datas without cancelled and diverted flights.
+data1 <- data1 %>% filter(Cancelled == 0 & Diverted == 0)
+data2 <- data2 %>% filter(Cancelled == 0 & Diverted == 0)
+
+#Full join data frames
+data <- data1 %>% full_join(data2)
+
+#Create delay column
+data$delay <- (data$ArrDelay+data$DepDelay)
+data$DepTime <- strptime(formatC(data$DepTime, width = 4, format = "d"), "%H%M")
+```
+
+```{r}
+# Count cascading delays from LAS to LAX and back
+data_LAS <- data %>%
+  filter(Origin == "LAS" & Dest == "LAX") %>%
+  mutate(DepDelay = as.numeric(DepDelay > 0),
+         ArrDelay = as.numeric(ArrDelay > 0)) %>%
+  filter(ArrDelay == 1) %>%
+  arrange(DepTime) %>%
+  group_by(DepTime) %>%
+  summarize(delay_in_A = sum(ArrDelay))
+
+data_LAX <- data %>%
+  filter(Origin == "LAX" & Dest == "LAS") %>%
+  mutate(DepDelay = as.numeric(DepDelay > 0),
+         ArrDelay = as.numeric(ArrDelay > 0)) %>%
+  filter(DepDelay == 1 & ArrDelay == 1) %>%
+  arrange(DepTime) %>%
+  group_by(DepTime) %>%
+  summarize(delay_in_B_and_C = sum(DepDelay, ArrDelay) / 2)
+```
+
+```{r}
+airport_A_B_A <- inner_join(data_LAX, data_LAS, by = "DepTime")
+airport_A_B_A <- airport_A_B_A %>%
+  filter(delay_in_B_and_C >= delay_in_A)
+
+num_cascading_delays <- nrow(airport_A_B_A)
+total_flights <- nrow(data_LAS)
+cascading_delay_percentage <- num_cascading_delays / total_flights * 100
+
+cat("There were", num_cascading_delays, "cascading delay failures from LAS to LAX and back, which is", round(cascading_delay_percentage, 1), "% of all flights on this route.")
+```
+
+```{r}
+# plot delay trends for LAS and LAX airports
+ggplot(airport_A_B_A, aes(x = DepTime)) +
+  geom_line(aes(y = delay_in_A, color = "LAS")) +
+  geom_line(aes(y = delay_in_B_and_C, color = "LAX")) +
+  scale_color_manual(name = "Airport", values = c("LAS" = "blue", "LAX" = "red")) +
+  labs(title = "Cascading Delays between LAS and LAX Airports",
+       x = "Time of Day",
+       y = "Number of Delays",
+       color = "Airport") +
+  theme_bw()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
